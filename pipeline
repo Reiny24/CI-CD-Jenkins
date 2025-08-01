@@ -1,0 +1,320 @@
+def studentEmail = "dmytro.huk2011@gmail.com"
+def repoName = ""
+def author = ""
+def testCases = []
+def reportContent
+def buildLog = ''
+def buildStatus = 0
+def variantLog = ''
+def variantStatus = 0
+def labLog = ''
+def labNumber = 0
+def variantNumber = 0
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'REPO_NAME', defaultValue: '', description: 'Ім’я репозиторію, наприклад: huk_dmytro/course2025_petrenko.ii')
+        string(name: 'GIT_SSH_URL', defaultValue: '', description: 'SSH URL до репозиторію')
+        string(name: 'BRANCH_NAME', defaultValue: 'refs/heads/master', description: 'Повна назва гілки, як refs/heads/master')
+    }
+
+    environment {
+        CREDENTIALS_ID = 'AGS_Gitea_SSH'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    if (!params.GIT_SSH_URL?.trim()) error("❌ GIT_SSH_URL не задано! Упевніться, що Webhook передає параметри.")
+                    def branch = params.BRANCH_NAME.replaceFirst(/^refs\/heads\//, '')
+                    echo "[.] Клонуємо репозиторій: ${params.GIT_SSH_URL}, гілка: ${branch}"
+                    git branch: branch, credentialsId: env.CREDENTIALS_ID, url: params.GIT_SSH_URL
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                script {
+                    // Виконуємо компіляцію та зберігаємо статус і вивід
+                    buildStatus = sh(script: 'gcc -o main main.c -lm', returnStatus: true)
+
+                    if (buildStatus != 0) {
+                        // Якщо код повернення не 0 — була помилка компіляції
+                        echo "❌ Помилка компіляції:"
+                        buildLog = sh(script: 'gcc -o main main.c 2>&1 || true', returnStdout: true).trim()
+                        echo buildLog
+                        return
+                    } else echo "✅ Збірка завершена успішно."
+
+                    if (!fileExists('./main')) buildLog = "❌ main не знайдено. Етап Build міг пройти невдало. Зверніться до викладача"
+                }
+            }
+        }
+
+        stage('Define Variant') {
+            steps {
+                script {
+                    if (buildStatus == 0) {
+                        def output = sh(script: "echo dummy | ./main", returnStdout: true).trim()
+                        def outputLines = output.split('\n')
+
+                        if (outputLines.size() < 2) {
+                            variantLog = "Немає виводу номеру варіанту або лабораторної від програми"
+                            echo variantLog
+                            variantStatus = 1
+                            return
+                        }
+
+                        // Визначення лабораторної
+                        def labMatch = outputLines[0] =~ /(\d+)/
+                        if (!labMatch) {
+                            labLog = "Не вдалося знайти номер лабораторної у першому рядку: '${outputLines[0]}'"
+                            echo labLog
+                            variantStatus = 1
+                            return
+                        }
+                        labNumber = labMatch[0][1].toInteger()
+                        echo "✅ Визначено лабораторну: ${labNumber}"
+
+                        // Визначення варіанту
+                        def variantMatch = outputLines[1] =~ /(\d+)/
+                        if (!variantMatch) {
+                            variantLog = "Не вдалося знайти номер варіанту у другому рядку"
+                            echo variantLog
+                            variantStatus = 1
+                            return
+                        }
+                        variantNumber = variantMatch[0][1].toInteger()
+                        echo "✅ Визначено варіант: ${variantNumber}"
+
+                        // Встановлення тест-кейсів для варіанту
+                        if (variantNumber == 1 && labNumber == 1) {
+                            testCases = [
+                                ['input': 'hello', 'expected': 'olleh'],
+                                ['input': '123456', 'expected': '654321'],
+                                ['input': 'Hello world 123', 'expected': '321 dlrow olleH'],
+                                ['input': '*/1-==1', 'expected': '1==-/1*']]
+                        } else if (variantNumber == 2 && labNumber == 1) {
+                            testCases = [
+                                ['input': 'hello', 'expected': 'HELLO'],
+                                ['input': '123456', 'expected': '123456'],
+                                ['input': 'Hello world 123', 'expected': 'HELLO WORLD 123'],
+                                ['input': '*/1-==1', 'expected': '*/1-==1']]
+                        } else if (variantNumber == 3 && labNumber == 1) {
+                            testCases = [
+                                ['input': 'HELLO', 'expected': 'hello'],
+                                ['input': '123456', 'expected': '123456'],
+                                ['input': 'Hello WORLD 123', 'expected': 'hello world 123'],
+                                ['input': '*/1-==1', 'expected': '*/1-==1']]
+                        } else if (variantNumber == 4 && labNumber == 1) {
+                            testCases = [
+                                ['input': 'hello', 'expected': 'HeLlO'],
+                                ['input': '123456', 'expected': '123456'],
+                                ['input': 'Hello world 123', 'expected': 'HeLlO WoRlD 123'],
+                                ['input': '*/1-==1', 'expected': '*/1-==1']]
+                        } else if (variantNumber == 5 && labNumber == 1) {
+                            testCases = [
+                                ['input': 'hello', 'expected': '2'],
+                                ['input': 'aeiouAEIOU', 'expected': '10'],
+                                ['input': 'Hello world 123', 'expected': '3'],
+                                ['input': '*/1-==1', 'expected': '0']]
+                        } else if (variantNumber == 6 && labNumber == 1) {
+                            testCases = [
+                                ['input': 'hello', 'expected': '3'],
+                                ['input': 'aeiouAEIOU', 'expected': '0'],
+                                ['input': 'Hello world 123', 'expected': '7'],
+                                ['input': '*/1-==1', 'expected': '0']]
+                        } else if (variantNumber == 7 && labNumber == 1) {
+                            testCases = [
+                                ['input': 'hello', 'expected': '0'],
+                                ['input': '123456', 'expected': '6'],
+                                ['input': 'Hello world 123', 'expected': '3'],
+                                ['input': '*/1-==1', 'expected': '2']]
+                        } else if (variantNumber == 8 && labNumber == 1) {
+                            testCases = [
+                                ['input': 'hello', 'expected': '5'],
+                                ['input': '123456', 'expected': '0'],
+                                ['input': 'Hello world 123', 'expected': '12'],
+                                ['input': '*/1-==1', 'expected': '6']]
+                        } else if (variantNumber == 9 && labNumber == 1) {
+                            testCases = [
+                                ['input1': 'hello', 'input2': 'hello', 'expected': '1'],
+                                ['input1': 'world', 'input2': 'word', 'expected': '0'],
+                                ['input1': '', 'input2': '', 'expected': '1'],
+                                ['input1': 'abc', 'input2': 'ABC', 'expected': '0']
+                            ]
+                        } else if (variantNumber == 1 && labNumber == 3) {
+                            testCases = [
+                                ['input':  '0.0', 'expected': '0.000000 0.000000'],
+                                ['input': '-0.5', 'expected': '0.413411 0.413411'],
+                                ['input': '-1.0', 'expected': '0.286375 0.286375'],
+                                ['input':  '2.0', 'expected': '0.489415 0.489415']]
+                        } else if (variantNumber == 2 && labNumber == 3) {
+                            testCases = [
+                                ['input': '0.0', 'expected': '2.000000 2.000000'],
+                                ['input': '-0.5', 'expected': '-0.528601 -0.528601'],
+                                ['input': '-1.0', 'expected': '-1.432281 -1.432281'],
+                                ['input': '2.0', 'expected': '1.173905 1.173905']
+                            ]
+                        } else if (variantNumber == 3 && labNumber == 3) {
+                            testCases = [
+                                ['input': '0.0', 'expected': '0.000000 0.000000'],
+                                ['input': '-0.5', 'expected': '−0.312049 −0.958852'],
+                                ['input': '-1.0', 'expected': '1.536290 −1.682942'],
+                                ['input': '2.0', 'expected': '0.954770 1.818594']
+                            ]
+                        } else if (variantNumber == 4 && labNumber == 3) {
+                            testCases = [
+                                ['input1': '1', 'input2': '1',   'expected': '0.000000 0.000000'],
+                                ['input1': '4', 'input2': '1',   'expected': '0.250000 0.250000'],
+                                ['input1': '2', 'input2': '0.5', 'expected': '0.353553 0.353553'],
+                                ['input1': '3', 'input2': '2',   'expected': '0.105946 0.105946']
+                            ]
+                        }
+                        else {
+                            variantLog = "Такий варіант відсутній в базі: ЛР №${labNumber} варіант №${variantNumber}"
+                            variantStatus = 1
+                            echo variantLog
+                            return
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Form report') {
+            steps {
+                script {
+                    repoName = params.REPO_NAME
+                    def commitSha = sh(script: "git rev-parse HEAD", returnStdout: true).trim().split('\n')[-1].trim()
+                    author = sh(script: 'git log -1 --pretty=format:"%an <%ae>"', returnStdout: true).trim()
+                    def commitMsg = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    def commitTime = sh(script: 'git log -1 --pretty=format:"%cd" --date=iso', returnStdout: true).trim()
+                    
+                    reportContent = new StringBuilder()
+                    reportContent.append("""
+                    <!DOCTYPE html>
+                    <html lang="uk">
+                    <head> <meta charset="UTF-8">
+                        <title>Test Report</title>
+                        <style>
+                        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                            background-color: #f5f7fa; color: #333; padding: 2em;}
+                        h1 { text-align: center; color: #2c3e50; }
+                        h2 { color: #34495e; margin-top: 0.5em; }
+                        p { font-size: 16px; margin: 0.4em 0; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 1.5em;}
+                        th, td { border: 1px solid #ccc; padding: 0.6em; text-align: center; }
+                        th { background-color: #2980b9; color: white; }
+                        tr:nth-child(even) { background-color: #ecf0f1; }
+                        tr:nth-child(odd) { background-color: #ffffff; }
+                        td { font-size: 15px; }
+                        td.passed { background-color: #d4edda; color: #155724; font-weight: bold; }
+                        td.failed { background-color: #f8d7da; color: #721c24; font-weight: bold; }
+                        .meta { background-color: #ffffff; border: 1px solid #ccc; padding: 1em; margin-bottom: 1em; border-radius: 6px; }
+                        </style>
+                    </head>
+                    <body> <h1>Test report</h1>
+                        <div class="meta">
+                        <h2>Repository: ${repoName}</h2>
+                        <p><strong>Commit:</strong> ${commitSha}</p>
+                        <p><strong>Author:</strong> ${author}</p>
+                        <p><strong>Commit message:</strong> ${commitMsg}</p>
+                        <p><strong>Commit time:</strong> ${commitTime}</p>
+                        <p><strong>Lab number:</strong> ${labNumber}</p>
+                        <p><strong>Variant number:</strong> ${variantNumber}</p></div>""")
+
+                    if (buildStatus != 0) 
+                        reportContent.append("""
+                            <div style="background-color: #f8d7da; color: #721c24; padding: 1em; border: 1px solid #f5c6cb; 
+                                border-radius: 6px; margin-bottom: 1em;">
+                                <h3>❌ Помилка компіляції вашої програми (Build error). Детальніше про помилку:</h3>
+                                <pre style="white-space: pre-wrap; word-wrap: break-word; font-size: 14px;">${buildLog}</pre></div>""")
+
+                    if (variantStatus != 0) 
+                        reportContent.append("""
+                            <div style="background-color: #fff3cd; color: #856404; 
+                                padding: 1em; border: 1px solid #ffeeba; border-radius: 6px; margin-bottom: 1em;">
+                                <h3>⚠️ Помилка визначення варіанту / результату. Перевірте формат програми до шаблону</h3>
+                                <p>${variantLog}</p></div>""")
+
+                    if (buildStatus == 0 && variantStatus == 0) 
+                        reportContent.append("""<table><tr><th>Input</th><th>Expected</th><th>Output</th><th>Test status</th></tr>""")
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                script {
+                    if (buildStatus == 0 && variantStatus == 0) {
+                        testCases.each { testCase ->
+                            def testOutput
+                            def result
+                            def inputDescription
+
+                            // Визначаємо, скільки інпутів використовується
+                            if (testCase.containsKey('input1') && testCase.containsKey('input2')) {
+                                // Якщо два параметри: input1 + input2
+                                inputDescription = "${testCase.input1} / ${testCase.input2}"
+                                testOutput = sh(
+                                script: """printf "%s\\n%s\\n" "${testCase.input1}" "${testCase.input2}" | ./main""",
+                                returnStdout: true
+                                ).trim().split('\n')
+                                result = testOutput[-1].trim()
+                            } else {
+                                // Якщо один параметр: input
+                                inputDescription = testCase.input
+                                testOutput = sh(
+                                script: "echo \"${testCase.input}\" | ./main",
+                                returnStdout: true
+                                ).trim().split('\n')
+                                result = testOutput[-1].trim()
+                            }
+
+                            def passed = (result == testCase.expected)
+
+                            // Додавання рядка до HTML-звіту
+                            reportContent.append("<tr>")
+                            reportContent.append("<td>${inputDescription}</td>")
+                            reportContent.append("<td>${testCase.expected}</td>")
+                            reportContent.append("<td>${result}</td>")
+                            reportContent.append("<td class='${passed ? "passed" : "failed"}'>${passed ? "Passed" : "Failed"}</td>")
+                            reportContent.append("</tr>")
+                        }
+                    }
+                    reportContent.append("</table></html>")
+                    writeFile file: 'report.html', text: reportContent.toString()
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            publishHTML([
+                allowMissing: false,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: '.',
+                reportFiles: 'report.html',
+                reportName: 'Test Report'
+            ])
+            
+            script {
+                sh 'wkhtmltopdf report.html report.pdf'
+                emailext (
+                    subject: "Test report for ${params.REPO_NAME}",
+                    body: """<p>PDF Test report is attached.</p><p>Repository: ${params.REPO_NAME}</p><p>Author: ${author}</p>""",
+                    to: "${studentEmail}",
+                    mimeType: 'text/html',
+                    attachmentsPattern: "report.pdf"
+                )
+            }
+        }
+    }
+}
